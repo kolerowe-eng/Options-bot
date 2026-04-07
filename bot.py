@@ -113,7 +113,9 @@ def main():
         elif now.hour == 15 and now.minute == 15:
             send_alert("Closing positions for the day to avoid pin risk.")
             # Add logic here to sell all open positions
-            
+        elif now.hour >= 15 and now.minute > 15:
+            send_alert("🌙 Market is closed. The Bad Boy is heading home. See you at 8:30 AM!")
+            return   
         time.sleep(300) # Check every 5 minutes
 
 if __name__ == "__main__":
