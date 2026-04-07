@@ -33,7 +33,9 @@ def get_kalshi_signal():
     ticker = f"KXSPY-{today_str}-D150" # SPY Down 1.5% 
     
     url = f"https://api.elections.kalshi.com/trade-api/v2/markets_by_ticker/{ticker}"
-    response = requests.get(url).json()
+    raw_response = requests.get(url)
+print(f"DEBUG: Status {raw_response.status_code}, Body: {raw_response.text}") # The X-Ray
+response = raw_response.json()
     
     # Probability = Yes Price / 100
     try:
