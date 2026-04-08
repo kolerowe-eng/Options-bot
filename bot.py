@@ -25,7 +25,7 @@ def send_alert(message):
 
 def get_kalshi_signal():
     # Today's Ticker for Tuesday, April 7, 2026
-    ticker = "KXINX-26APR07H1600"
+    ticker = "KXINX-26APR08H1600"
     url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
