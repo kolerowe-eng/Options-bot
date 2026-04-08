@@ -24,27 +24,29 @@ def send_alert(message):
     requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
 
 def get_kalshi_signal():
-    # Today's Ticker for Tuesday, April 7, 2026
-    ticker = "KXINX-26APR08H1600"
-    url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
+    # Today's Ticker for Wednesday, April 8, 2026
+    # Midpoint of the 6,750-6,775 bracket
+    ticker = "KXINX-26APR08-B6762.5"
+    url = f"https://trading-api.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
         raw_response = requests.get(url)
-        # The Diagnostic "X-Ray" - This will show up in your logs
+        # The Diagnostic "X-Ray"
         print(f"DEBUG: Status {raw_response.status_code}, Body: {raw_response.text[:100]}")
         
-        # If the server is sending "200 OK" as text, this will catch it
         if raw_response.status_code != 200:
             return 0
             
         data = raw_response.json()
-        # Adjust this 'last_price' line if your specific bot logic uses a different field
-        prob = data.get('market', {}).get('last_price', 0) / 100.0
+        # Grabbing the 'yes_price' which represents the probability
+        market_data = data.get('market', {})
+        prob = market_data.get('yes_price', 0) / 100.0
         return prob
         
     except Exception as e:
         print(f"Kalshi Triage Error: {e}")
         return 0
+
 
 def get_tradier_lottos(symbol):
     """
