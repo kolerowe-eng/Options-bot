@@ -26,7 +26,7 @@ def send_alert(message):
 def get_kalshi_signal():
     # Today's Ticker for Wednesday, April 8, 2026
     # Midpoint of the 6,750-6,775 bracket
-    ticker = "KXINX-26APR08-B6762.5"
+    ticker = "KXINX-26APR09-B6762.5"
     url = f"https://trading-api.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
@@ -95,7 +95,8 @@ def main():
         now = datetime.now(EST)
         
         # Only run between 10:30 AM and 3:15 PM EST
-        if now.hour >= 10 and now.minute >= 30 and now.hour < 15:
+        current_time_val = now.hour * 100 + now.minute
+        if current_time_val >= 1030 and current_time_val <= 1600:
             
             k_prob = get_kalshi_signal()
             lotto = get_tradier_lottos("SPY")
