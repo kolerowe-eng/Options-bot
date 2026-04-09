@@ -24,23 +24,24 @@ def send_alert(message):
     requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message})
 
 def get_kalshi_signal():
-    # Today's Ticker for Wednesday, April 8, 2026
-    # Midpoint of the 6,750-6,775 bracket
-    ticker = "KXINX-26APR09-B6762.5"
-    url = f"https://trading-api.kalshi.com/trade-api/v2/markets/{ticker}"
+    # Thursday, April 9 Ticker: 6750-6775 Bracket
+    # Note: Kalshi is using the 'B6762' format today for the 4:00 PM close
+    ticker = "KXINX-26APR09H1600-B6762"
+    
+    # We are moving back to the elections domain as requested by the server
+    url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
         raw_response = requests.get(url)
-        # The Diagnostic "X-Ray"
+        # Keeping our diagnostic X-Ray
         print(f"DEBUG: Status {raw_response.status_code}, Body: {raw_response.text[:100]}")
         
         if raw_response.status_code != 200:
             return 0
             
         data = raw_response.json()
-        # Grabbing the 'yes_price' which represents the probability
-        market_data = data.get('market', {})
-        prob = market_data.get('yes_price', 0) / 100.0
+        # Grabbing the latest 'yes_price' (probability)
+        prob = data.get('market', {}).get('yes_price', 0) / 100.0
         return prob
         
     except Exception as e:
