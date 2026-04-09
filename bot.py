@@ -101,7 +101,19 @@ def main():
             
             k_prob = get_kalshi_signal()
             lotto = get_tradier_lottos("SPY")
-            
+# ... existing code ...
+            if k_prob and lotto:
+                # Option Delta as a proxy for market-implied probability
+                opt_prob = abs(lotto['greeks']['delta'])
+                
+                # --- PASTE STARTING HERE (LINE 104) ---
+                print(f"📊 Kalshi Prob: {k_prob:.2f}")
+                print(f"📈 Tradier Prob: {opt_prob:.2f}")
+                print(f"⚖️ Gap: {abs(k_prob - opt_prob):.2f}")
+                # --- PASTE END ---
+
+                # THE ARBITRAGE TRIGGER:
+# ... rest of code ...            
             if k_prob and lotto:
                 # Option Delta as a proxy for market-implied probability
                 opt_prob = abs(lotto['greeks']['delta'])
