@@ -93,42 +93,38 @@ def main():
     
     while True:
         now = datetime.now(EST)
-        
-        # This checks the time in EST (10:30 AM to 4:00 PM)
-        # Translation: 9:30 AM to 3:00 PM for you in Richmond
         current_time_val = now.hour * 100 + now.minute
         
         if 1030 <= current_time_val < 1600:
             k_prob = get_kalshi_signal()
             lotto = get_tradier_lottos("SPY")
             
-            if k_prob and lotto:
-                # Option Delta as a proxy for market-implied probability
-                opt_prob = abs(lotto['greeks']['delta'])
-                
-                # This shows the math in your Railway logs every 5 minutes
+            # --- VITAL SIGNS (These will print even if no trade is found) ---
+            if k_prob:
                 print(f"📊 Kalshi Prob: {k_prob:.2f}")
-                print(f"📈 Tradier Prob: {opt_prob:.2f}")
-                print(f"⚖️ Gap: {abs(k_prob - opt_prob):.2f}")
-
-                # THE ARBITRAGE TRIGGER:
+            else:
+                print("❌ Kalshi: No signal found.")
+                
+            if lotto:
+                opt_prob = abs(lotto['greeks']['delta'])
+                print(f"📈 Tradier Prob: {opt_prob:.2f} (Strike: {lotto['strike']})")
+                print(f"⚖️ Current Gap: {abs(k_prob - opt_prob):.2f}")
+                
+                # THE ARBITRAGE TRIGGER
                 if k_prob > (opt_prob + PROB_EDGE_THRESHOLD):
                     qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
                     if qty > 0:
                         place_paper_order(lotto['symbol'], qty)
-                        # Wait 1 hour after a trade to prevent over-trading
                         time.sleep(3600) 
+            else:
+                print("❌ Tradier: No cheap 'Lotto' puts found in the $0.05-$0.12 range.")
+            # ---------------------------------------------------------------
             
         elif now.hour == 15 and now.minute == 15:
-            send_alert("💰 POSITIONS CLOSED: End of day safety check performed.")
-            # Future home for auto-sell logic
+            send_alert("💰 POSITIONS CLOSED: End of day safety check.")
             
         elif current_time_val >= 1601:
-            send_alert("🌙 Market is closed. The Bad Boy is heading home. See you at 8:30 AM!")
+            send_alert("🌙 Market is closed. Heading home.")
             return   
             
-        # Wait 5 minutes between scans
-        time.sleep(300) 
-
-if __name__ == "__main__":
-    main()
+        time.sleep(300)
