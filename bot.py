@@ -16,7 +16,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = ["SPY"]
 MAX_RISK_PER_TRADE = 200 
-PROB_EDGE_THRESHOLD = 0.01 
+PROB_EDGE_THRESHOLD = 0.03 
 EST = pytz.timezone('US/Eastern')
 
 # --- 2. CORE FUNCTIONS ---
@@ -29,7 +29,7 @@ def send_alert(message):
         print(f"Telegram Error: {e}")
 
 def get_kalshi_signal():
-    ticker = "KXINX-26APR09H1600-B6762"
+    ticker = "KXINX-26APR10H1600-B6812"
     url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
