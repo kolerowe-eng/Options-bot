@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: This will print as soon as the bot starts
+# 🩺 SYSTEM CHECK: Bot ignition
 print("🩺 SYSTEM CHECK: Bot script is loading...")
 
 # --- 1. CONFIGURATION ---
@@ -34,10 +34,14 @@ def get_current_spy_price():
     headers = {'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}
     try:
         response = requests.get(url, params=params, headers=headers).json()
-        price = float(response['quotes']['quote']['last'])
+        # Robust check for Tradier's list or dict response
+        quote_data = response.get('quotes', {}).get('quote', {})
+        if isinstance(quote_data, list):
+            quote_data = quote_data[0]
+        price = float(quote_data.get('last', 0))
         return price
     except Exception as e:
-        print(f"Error getting SPY price: {e}")
+        print(f"Tradier Price Error: {e}")
         return None
 
 def get_automated_ticker():
@@ -47,22 +51,27 @@ def get_automated_ticker():
     
     spx_approx = spy_price * 10
     now = datetime.now(EST)
-    date_str = now.strftime("%y%b%d").upper()
+    date_str = now.strftime("%y%b%d").upper() # 26APR13
     event_ticker = f"KXINX-{date_str}H1600"
     
-    url = f"https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}"
+    # CRITICAL FIX: Added ?with_nested_markets=true to get the B-brackets
+    url = f"https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}?with_nested_markets=true"
     
     try:
         response = requests.get(url).json()
-        markets = response.get('event', {}).get('markets', [])
+        # Look for markets in either the 'event' object or the top level
+        markets = response.get('markets', []) or response.get('event', {}).get('markets', [])
+        
+        print(f"🔍 Scan: SPY at {spy_price:.2f} (SPX ~{spx_approx:.2f}). Found {len(markets)} brackets.")
+        
         for m in markets:
             floor = m.get('floor_strike', 0)
             cap = m.get('cap_strike', 99999)
             if floor <= spx_approx <= cap:
-                print(f"🎯 Auto-Discovery: Matching bracket {m['ticker']} for SPX ~{spx_approx:.2f}")
+                print(f"🎯 Match: {m['ticker']} ({floor}-{cap})")
                 return m['ticker']
     except Exception as e:
-        print(f"Error auto-discovering ticker: {e}")
+        print(f"Discovery Error: {e}")
     return None
 
 def get_kalshi_signal(ticker):
@@ -73,10 +82,11 @@ def get_kalshi_signal(ticker):
             return 0
         data = raw_response.json()
         m = data.get('market', {})
-        price = m.get('last_price') or m.get('yes_ask') or m.get('yes_price', 0)
+        # V2 robust check for various price field names
+        price = m.get('last_price') or m.get('yes_ask') or m.get('yes_bid') or m.get('yes_price', 0)
         return float(price) / 100.0 if price > 1 else float(price)
     except Exception as e:
-        print(f"Kalshi Signal Error: {e}")
+        print(f"Signal Error: {e}")
         return 0
 
 def get_tradier_lottos(symbol):
@@ -89,11 +99,13 @@ def get_tradier_lottos(symbol):
         if 'options' not in response or response['options'] is None:
             return None
         options = response['options']['option']
+        # Hunting for puts in the 'cheap' zone
         lottos = [opt for opt in options if opt['option_type'] == 'put' and 0.05 <= opt['ask'] <= 0.12]
         if lottos:
+            # Return the one with highest Delta (highest chance of being 'in the money')
             return sorted(lottos, key=lambda x: x['greeks']['delta'])[0]
     except Exception as e:
-        print(f"Tradier Lotto Error: {e}")
+        print(f"Lotto Error: {e}")
     return None
 
 def place_paper_order(option_symbol, qty):
@@ -103,18 +115,20 @@ def place_paper_order(option_symbol, qty):
         'class': 'option', 'symbol': 'SPY', 'option_symbol': option_symbol,
         'side': 'buy_to_open', 'quantity': qty, 'type': 'market', 'duration': 'day'
     }
-    requests.post(url, data=data, headers=headers)
+    res = requests.post(url, data=data, headers=headers)
+    print(f"DEBUG: Tradier Order Status {res.status_code}")
     send_alert(f"🚀 ORDER PLACED: Bought {qty} contracts of {option_symbol}")
 
 # --- 3. MAIN EXECUTION LOOP ---
 
 def main():
-    send_alert("🤖 Bot is online. Scanning every 30 seconds for maximum heat...")
+    send_alert("🤖 Bot Online in Richmond. High-Frequency Hunter mode active.")
     
     while True:
         now = datetime.now(EST)
         current_time_val = now.hour * 100 + now.minute
         
+        # 10:30 AM to 4:00 PM EST (9:30 AM to 3:00 PM in Richmond)
         if 1030 <= current_time_val < 1600:
             ticker = get_automated_ticker()
             if ticker:
@@ -122,7 +136,7 @@ def main():
                 lotto = get_tradier_lottos("SPY")
                 
                 if k_prob:
-                    print(f"📊 Kalshi Prob ({ticker[-5:]}): {k_prob:.2f}")
+                    print(f"📊 Kalshi Prob: {k_prob:.2f}")
                 
                 if lotto:
                     opt_prob = abs(lotto['greeks']['delta'])
@@ -133,20 +147,16 @@ def main():
                         qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
                         if qty > 0:
                             place_paper_order(lotto['symbol'], qty)
-                            time.sleep(3600) # Safety cooldown
+                            time.sleep(3600) # Cooldown
                 else:
-                    print("❌ Tradier: No cheap puts in range.")
+                    print("❌ Tradier: No cheap puts found today.")
             else:
-                print("❌ Auto-Discovery: No active bracket.")
-            
-        elif now.hour == 15 and now.minute == 15:
-            send_alert("💰 POSITIONS CLOSED: End of day safety check.")
+                print("❌ Auto-Discovery: No active bracket found for this price.")
             
         elif current_time_val >= 1601:
             send_alert("🌙 Market is closed. Heading home.")
             return   
             
-        # --- THE SPEED UPDATE ---
         print("⏳ Fast Scan: Waiting 30 seconds...")
         time.sleep(30)
 
