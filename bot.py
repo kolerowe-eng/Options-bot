@@ -29,19 +29,25 @@ def send_alert(message):
         print(f"Telegram Error: {e}")
 
 def get_kalshi_signal():
-    ticker = "KXINX-26APR13H1600-B6837"
+    ticker = "KXINX-26APR13H1600-B6862"
     url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
         raw_response = requests.get(url)
-        print(f"DEBUG: Kalshi Status {raw_response.status_code}")
-        
         if raw_response.status_code != 200:
             return 0
             
         data = raw_response.json()
-        prob = data.get('market', {}).get('yes_price', 0) / 100.0
-        return prob
+        
+        # V2 robust check: look for market object OR root level
+        m_data = data.get('market', data) 
+        
+        # Check multiple field names (cents or dollars)
+        price = m_data.get('last_price') or m_data.get('yes_bid') or m_data.get('yes_price', 0)
+        
+        # Convert to 0.XX format
+        return float(price) / 100.0 if price > 1 else float(price)
+        
     except Exception as e:
         print(f"Kalshi Error: {e}")
         return 0
