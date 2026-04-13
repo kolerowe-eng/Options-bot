@@ -29,7 +29,7 @@ def send_alert(message):
         print(f"Telegram Error: {e}")
 
 def get_kalshi_signal():
-    ticker = "KXINX-26APR10H1600-B6812"
+    ticker = "KXINX-26APR13H1600-B6762"
     url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
     
     try:
