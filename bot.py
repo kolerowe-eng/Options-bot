@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: Bot ignition
-print("🩺 SYSTEM CHECK: Bot script is loading...")
+# 🩺 SYSTEM CHECK: Final push loading...
+print("🩺 SYSTEM CHECK: High-Frequency Bot is loading...")
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -34,60 +34,44 @@ def get_current_spy_price():
     headers = {'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}
     try:
         response = requests.get(url, params=params, headers=headers).json()
-        # Robust check for Tradier's list or dict response
         quote_data = response.get('quotes', {}).get('quote', {})
         if isinstance(quote_data, list):
             quote_data = quote_data[0]
-        price = float(quote_data.get('last', 0))
-        return price
+        return float(quote_data.get('last', 0))
     except Exception as e:
         print(f"Tradier Price Error: {e}")
         return None
 
-def get_automated_ticker():
+def get_automated_ticker_and_prob():
+    """Finds today's ticker AND its probability in one single move."""
     spy_price = get_current_spy_price()
     if not spy_price:
-        return None
+        return None, 0
     
     spx_approx = spy_price * 10
     now = datetime.now(EST)
-    date_str = now.strftime("%y%b%d").upper() # 26APR13
+    date_str = now.strftime("%y%b%d").upper()
     event_ticker = f"KXINX-{date_str}H1600"
     
-    # CRITICAL FIX: Added ?with_nested_markets=true to get the B-brackets
     url = f"https://api.elections.kalshi.com/trade-api/v2/events/{event_ticker}?with_nested_markets=true"
     
     try:
         response = requests.get(url).json()
-        # Look for markets in either the 'event' object or the top level
         markets = response.get('markets', []) or response.get('event', {}).get('markets', [])
-        
-        print(f"🔍 Scan: SPY at {spy_price:.2f} (SPX ~{spx_approx:.2f}). Found {len(markets)} brackets.")
         
         for m in markets:
             floor = m.get('floor_strike', 0)
             cap = m.get('cap_strike', 99999)
             if floor <= spx_approx <= cap:
-                print(f"🎯 Match: {m['ticker']} ({floor}-{cap})")
-                return m['ticker']
+                # Grab price directly from the discovery object
+                price_raw = m.get('last_price') or m.get('yes_ask') or m.get('yes_bid') or 0
+                prob = float(price_raw) / 100.0 if price_raw > 1 else float(price_raw)
+                
+                print(f"🎯 Match: {m['ticker']} | Kalshi Prob: {prob:.2f}")
+                return m['ticker'], prob
     except Exception as e:
         print(f"Discovery Error: {e}")
-    return None
-
-def get_kalshi_signal(ticker):
-    url = f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}"
-    try:
-        raw_response = requests.get(url)
-        if raw_response.status_code != 200:
-            return 0
-        data = raw_response.json()
-        m = data.get('market', {})
-        # V2 robust check for various price field names
-        price = m.get('last_price') or m.get('yes_ask') or m.get('yes_bid') or m.get('yes_price', 0)
-        return float(price) / 100.0 if price > 1 else float(price)
-    except Exception as e:
-        print(f"Signal Error: {e}")
-        return 0
+    return None, 0
 
 def get_tradier_lottos(symbol):
     url = "https://sandbox.tradier.com/v1/markets/options/chains"
@@ -99,13 +83,11 @@ def get_tradier_lottos(symbol):
         if 'options' not in response or response['options'] is None:
             return None
         options = response['options']['option']
-        # Hunting for puts in the 'cheap' zone
         lottos = [opt for opt in options if opt['option_type'] == 'put' and 0.05 <= opt['ask'] <= 0.12]
         if lottos:
-            # Return the one with highest Delta (highest chance of being 'in the money')
             return sorted(lottos, key=lambda x: x['greeks']['delta'])[0]
     except Exception as e:
-        print(f"Lotto Error: {e}")
+        print(f"Tradier Lotto Error: {e}")
     return None
 
 def place_paper_order(option_symbol, qty):
@@ -115,43 +97,42 @@ def place_paper_order(option_symbol, qty):
         'class': 'option', 'symbol': 'SPY', 'option_symbol': option_symbol,
         'side': 'buy_to_open', 'quantity': qty, 'type': 'market', 'duration': 'day'
     }
-    res = requests.post(url, data=data, headers=headers)
-    print(f"DEBUG: Tradier Order Status {res.status_code}")
+    requests.post(url, data=data, headers=headers)
     send_alert(f"🚀 ORDER PLACED: Bought {qty} contracts of {option_symbol}")
 
 # --- 3. MAIN EXECUTION LOOP ---
 
 def main():
-    send_alert("🤖 Bot Online in Richmond. High-Frequency Hunter mode active.")
+    send_alert("🤖 Bot is active. Final 15 minutes of the hunt in Richmond!")
     
     while True:
         now = datetime.now(EST)
         current_time_val = now.hour * 100 + now.minute
         
-        # 10:30 AM to 4:00 PM EST (9:30 AM to 3:00 PM in Richmond)
+        # Runs until 4:00 PM EST (3:00 PM CST)
         if 1030 <= current_time_val < 1600:
-            ticker = get_automated_ticker()
-            if ticker:
-                k_prob = get_kalshi_signal(ticker)
+            ticker, k_prob = get_automated_ticker_and_prob()
+            
+            if ticker and k_prob > 0:
                 lotto = get_tradier_lottos("SPY")
-                
-                if k_prob:
-                    print(f"📊 Kalshi Prob: {k_prob:.2f}")
                 
                 if lotto:
                     opt_prob = abs(lotto['greeks']['delta'])
+                    gap = abs(k_prob - opt_prob)
+                    
+                    print(f"📊 Kalshi Prob: {k_prob:.2f}")
                     print(f"📈 Tradier Prob: {opt_prob:.2f} (Strike: {lotto['strike']})")
-                    print(f"⚖️ Current Gap: {abs(k_prob - opt_prob):.2f}")
+                    print(f"⚖️ Current Gap: {gap:.2f}")
                     
                     if k_prob > (opt_prob + PROB_EDGE_THRESHOLD):
                         qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
                         if qty > 0:
                             place_paper_order(lotto['symbol'], qty)
-                            time.sleep(3600) # Cooldown
+                            time.sleep(3600) # Trade cooldown
                 else:
-                    print("❌ Tradier: No cheap puts found today.")
+                    print("❌ Tradier: No cheap puts found in range.")
             else:
-                print("❌ Auto-Discovery: No active bracket found for this price.")
+                print("⚠️ No valid Kalshi price signal found yet.")
             
         elif current_time_val >= 1601:
             send_alert("🌙 Market is closed. Heading home.")
