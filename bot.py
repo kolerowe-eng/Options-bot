@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: High-Frequency Scalper Loading...
-print("🩺 SYSTEM CHECK: Relentless Scalper (v3.0) is active.", flush=True)
+# 🩺 SYSTEM CHECK: Heartbeat Scalper Loading...
+print("🩺 SYSTEM CHECK: Relentless Scalper (v3.1) is starting.", flush=True)
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -16,8 +16,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 PROB_EDGE_THRESHOLD = 0.03 
 MAX_RISK_PER_TRADE = 200   
-TAKE_PROFIT_PCT = 0.20 # Sell at 20% gain
-STOP_LOSS_PCT = 0.20   # Sell at 20% loss
+TAKE_PROFIT_PCT = 0.20 
+STOP_LOSS_PCT = 0.20   
 EST = pytz.timezone('US/Eastern')
 
 # --- 2. CORE FUNCTIONS ---
@@ -44,7 +44,7 @@ def get_automated_ticker_and_prob():
     date_str = datetime.now(EST).strftime("%y%b%d").upper()
     url = f"https://api.elections.kalshi.com/trade-api/v2/events/KXINX-{date_str}H1600?with_nested_markets=true"
     try:
-        res = requests.get(url).json()
+        res = requests.get(url, timeout=10).json()
         markets = res.get('markets', []) or res.get('event', {}).get('markets', [])
         for m in markets:
             if m.get('floor_strike', 0) <= spx_approx <= m.get('cap_strike', 99999):
@@ -70,85 +70,89 @@ def place_order(symbol, qty, side='buy_to_open'):
         'class': 'option', 'symbol': 'SPY', 'option_symbol': symbol,
         'side': side, 'quantity': qty, 'type': 'market', 'duration': 'day'
     }
-    requests.post(url, data=data, headers=headers)
+    try:
+        res = requests.post(url, data=data, headers=headers)
+        return res.status_code
+    except: return 500
 
 # --- 3. THE SCALPING ENGINE ---
 
 def manage_active_trades():
-    """Constantly checks current positions for TP/SL and the EOD Kill-Switch."""
     positions = get_live_positions()
     now = datetime.now(EST)
     time_val = now.hour * 100 + now.minute
     
     for p in positions:
-        symbol = p['symbol']
-        qty = int(p['quantity'])
-        cost = float(p['cost_basis']) / qty
-        
-        # Get live bid
-        q_url = f"https://sandbox.tradier.com/v1/markets/quotes?symbols={symbol}"
-        q_res = requests.get(q_url, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
-        current_bid = float(q_res['quotes']['quote'].get('bid', 0))
-        
-        # EXIT 1: KILL-SWITCH (2:50 PM CST)
-        if time_val >= 1550:
-            place_order(symbol, qty, 'sell_to_close')
-            send_alert(f"💰 EOD KILL-SWITCH: Closed {symbol}")
-            continue
+        try:
+            symbol = p['symbol']
+            qty = int(p['quantity'])
+            cost = float(p['cost_basis']) / qty
+            
+            q_url = f"https://sandbox.tradier.com/v1/markets/quotes?symbols={symbol}"
+            q_res = requests.get(q_url, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
+            current_bid = float(q_res['quotes']['quote'].get('bid', 0))
+            
+            if time_val >= 1550:
+                place_order(symbol, qty, 'sell_to_close')
+                send_alert(f"💰 EOD EXIT: Closed {symbol}")
+                continue
 
-        # EXIT 2: SCALPER PROFITS/LOSS
-        if current_bid > 0:
-            change = (current_bid - cost) / cost
-            if change >= TAKE_PROFIT_PCT:
-                place_order(symbol, qty, 'sell_to_close')
-                send_alert(f"💎 SCALP WIN: Closed {symbol} at +{change*100:.1f}%")
-            elif change <= -STOP_LOSS_PCT:
-                place_order(symbol, qty, 'sell_to_close')
-                send_alert(f"🛑 STOP LOSS: Closed {symbol} at {change*100:.1f}%")
+            if current_bid > 0:
+                change = (current_bid - cost) / cost
+                if change >= TAKE_PROFIT_PCT:
+                    place_order(symbol, qty, 'sell_to_close')
+                    send_alert(f"💎 WIN: {symbol} at +{change*100:.1f}%")
+                elif change <= -STOP_LOSS_PCT:
+                    place_order(symbol, qty, 'sell_to_close')
+                    send_alert(f"🛑 LOSS: {symbol} at {change*100:.1f}%")
+        except: continue
 
 def main():
-    send_alert("🤖 SCALPER ONLINE: Constant Hunt & Sell mode active.")
+    send_alert("🤖 HEARTBEAT SCALPER ONLINE: Logging every 30s.")
     
     while True:
         now = datetime.now(EST)
         time_val = now.hour * 100 + now.minute
         
-        # 1. ALWAYS MANAGE EXITS (Every 30 seconds)
+        # 1. Heartbeat Log (This ensures you see activity every 30 seconds)
+        print(f"🕒 [{now.strftime('%H:%M:%S')}] Heartbeat: Managing & Scanning...", flush=True)
+        
+        # 2. Manage Exits
         manage_active_trades()
         
-        # 2. HUNTING PHASE (8:30 AM - 2:50 PM CST)
+        # 3. Hunting Phase (8:30 AM - 2:50 PM CST)
         if 930 <= time_val < 1550:
             ticker, k_prob = get_automated_ticker_and_prob()
             
-            if ticker and k_prob > 0:
+            if ticker:
                 # Get chain
                 url = "https://sandbox.tradier.com/v1/markets/options/chains"
                 params = {'symbol': 'SPY', 'expiration': now.strftime("%Y-%m-%d"), 'greeks': 'true'}
-                res = requests.get(url, params=params, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
-                options = res.get('options', {}).get('option', [])
-                lottos = [o for o in options if o['option_type'] == 'put' and 0.01 <= o['ask'] <= 0.25]
-                
-                if lottos:
-                    lotto = sorted(lottos, key=lambda x: x['greeks']['delta'])[0]
-                    opt_prob = abs(lotto['greeks']['delta'])
-                    gap = k_prob - opt_prob
+                try:
+                    res = requests.get(url, params=params, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
+                    options = res.get('options', {}).get('option', [])
+                    lottos = [o for o in options if o['option_type'] == 'put' and 0.01 <= o['ask'] <= 0.25]
                     
-                    # LOGGING
-                    print(f"🎯 {ticker[-5:]} | K: {k_prob:.2f} | T: {opt_prob:.2f} | Gap: {gap:.2f}", flush=True)
-                    
-                    if gap > PROB_EDGE_THRESHOLD:
-                        # POSITION CHECK: Don't buy the EXACT same option if we already have it
-                        current_symbols = [p['symbol'] for p in get_live_positions()]
-                        if lotto['symbol'] not in current_symbols:
-                            qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
-                            if qty > 0:
-                                place_order(lotto['symbol'], qty)
-                                send_alert(f"🚀 SCALP ENTRY: Bought {qty} {lotto['symbol']} (Edge: {gap:.2f})")
-            else:
-                if time_val % 5 == 0: print("🔎 Scanning for market gaps...", flush=True)
-
+                    if lottos:
+                        lotto = sorted(lottos, key=lambda x: x['greeks']['delta'])[0]
+                        opt_prob = abs(lotto['greeks']['delta'])
+                        gap = k_prob - opt_prob
+                        
+                        # Only print the gap if we find one (to keep logs clean but informative)
+                        if k_prob > 0:
+                            print(f"📊 {ticker[-5:]} | K: {k_prob:.2f} | T: {opt_prob:.2f} | Gap: {gap:.2f}", flush=True)
+                        
+                        if gap > PROB_EDGE_THRESHOLD:
+                            current_symbols = [p['symbol'] for p in get_live_positions()]
+                            if lotto['symbol'] not in current_symbols:
+                                qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
+                                if qty > 0:
+                                    place_order(lotto['symbol'], qty)
+                                    send_alert(f"🚀 SCALP ENTRY: {qty} {lotto['symbol']} (Gap: {gap:.2f})")
+                except: pass
+            
         elif time_val >= 1601:
-            send_alert("🌙 Market closed. Bot resting.")
+            send_alert("🌙 Market closed.")
             return   
             
         time.sleep(30)
