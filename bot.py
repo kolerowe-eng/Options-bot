@@ -5,7 +5,7 @@ from datetime import datetime
 import pytz
 
 # 🩺 SYSTEM CHECK: Heartbeat Scalper Loading...
-print("🩺 SYSTEM CHECK: Relentless Scalper (v3.1) is starting.", flush=True)
+print("🩺 SYSTEM CHECK: Relentless Scalper (v3.2 - Crash Proof) is starting.", flush=True)
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -38,11 +38,14 @@ def get_current_spy_price():
     except: return None
 
 def get_automated_ticker_and_prob():
+    """Finds the ticker and prob. Returns (None, 0) if not found."""
     spy_price = get_current_spy_price()
     if not spy_price: return None, 0
+    
     spx_approx = spy_price * 10
     date_str = datetime.now(EST).strftime("%y%b%d").upper()
     url = f"https://api.elections.kalshi.com/trade-api/v2/events/KXINX-{date_str}H1600?with_nested_markets=true"
+    
     try:
         res = requests.get(url, timeout=10).json()
         markets = res.get('markets', []) or res.get('event', {}).get('markets', [])
@@ -51,7 +54,12 @@ def get_automated_ticker_and_prob():
                 raw = (m.get('last_price_dollars') or m.get('yes_bid_dollars') or m.get('yes_ask_dollars') or 0)
                 prob = float(raw) / 100.0 if raw > 1 else float(raw)
                 return m['ticker'], prob
-    except: return None, 0
+    except Exception as e:
+        print(f"⚠️ Discovery API Error: {e}", flush=True)
+        return None, 0
+    
+    # CRITICAL FIX: If loop finishes with no match, return tuple instead of None
+    return None, 0
 
 def get_live_positions():
     url = f"https://sandbox.tradier.com/v1/accounts/{TRADIER_ACCOUNT_ID}/positions"
@@ -105,30 +113,29 @@ def manage_active_trades():
                 elif change <= -STOP_LOSS_PCT:
                     place_order(symbol, qty, 'sell_to_close')
                     send_alert(f"🛑 LOSS: {symbol} at {change*100:.1f}%")
-        except: continue
+        except Exception as e:
+            print(f"⚠️ Management Error for {p.get('symbol')}: {e}", flush=True)
+            continue
 
 def main():
-    send_alert("🤖 HEARTBEAT SCALPER ONLINE: Logging every 30s.")
+    send_alert("🤖 CRASH-PROOF SCALPER ONLINE: Heartbeat running.")
     
     while True:
-        now = datetime.now(EST)
-        time_val = now.hour * 100 + now.minute
-        
-        # 1. Heartbeat Log (This ensures you see activity every 30 seconds)
-        print(f"🕒 [{now.strftime('%H:%M:%S')}] Heartbeat: Managing & Scanning...", flush=True)
-        
-        # 2. Manage Exits
-        manage_active_trades()
-        
-        # 3. Hunting Phase (8:30 AM - 2:50 PM CST)
-        if 930 <= time_val < 1550:
-            ticker, k_prob = get_automated_ticker_and_prob()
+        try:
+            now = datetime.now(EST)
+            time_val = now.hour * 100 + now.minute
             
-            if ticker:
-                # Get chain
-                url = "https://sandbox.tradier.com/v1/markets/options/chains"
-                params = {'symbol': 'SPY', 'expiration': now.strftime("%Y-%m-%d"), 'greeks': 'true'}
-                try:
+            print(f"🕒 [{now.strftime('%H:%M:%S')}] Heartbeat: Active.", flush=True)
+            
+            manage_active_trades()
+            
+            if 930 <= time_val < 1550:
+                # UNPACKING SAFETY: get_automated_ticker_and_prob now ALWAYS returns two values
+                ticker, k_prob = get_automated_ticker_and_prob()
+                
+                if ticker:
+                    url = "https://sandbox.tradier.com/v1/markets/options/chains"
+                    params = {'symbol': 'SPY', 'expiration': now.strftime("%Y-%m-%d"), 'greeks': 'true'}
                     res = requests.get(url, params=params, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
                     options = res.get('options', {}).get('option', [])
                     lottos = [o for o in options if o['option_type'] == 'put' and 0.01 <= o['ask'] <= 0.25]
@@ -138,7 +145,6 @@ def main():
                         opt_prob = abs(lotto['greeks']['delta'])
                         gap = k_prob - opt_prob
                         
-                        # Only print the gap if we find one (to keep logs clean but informative)
                         if k_prob > 0:
                             print(f"📊 {ticker[-5:]} | K: {k_prob:.2f} | T: {opt_prob:.2f} | Gap: {gap:.2f}", flush=True)
                         
@@ -149,11 +155,16 @@ def main():
                                 if qty > 0:
                                     place_order(lotto['symbol'], qty)
                                     send_alert(f"🚀 SCALP ENTRY: {qty} {lotto['symbol']} (Gap: {gap:.2f})")
-                except: pass
-            
-        elif time_val >= 1601:
-            send_alert("🌙 Market closed.")
-            return   
+                else:
+                    if time_val % 5 == 0: print("🔎 Scanner: Searching for market liquidity...", flush=True)
+                    
+            elif time_val >= 1601:
+                send_alert("🌙 Market closed.")
+                return   
+
+        except Exception as e:
+            # This block keeps the bot alive if anything else fails
+            print(f"🚨 MAJOR SYSTEM ERROR: {e}. Retrying in 30s...", flush=True)
             
         time.sleep(30)
 
