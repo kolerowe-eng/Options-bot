@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: Heartbeat Scalper Loading...
-print("🩺 SYSTEM CHECK: Relentless Scalper (v3.2 - Crash Proof) is starting.", flush=True)
+# 🩺 SYSTEM CHECK: Strict-Type Scalper Loading...
+print("🩺 SYSTEM CHECK: Relentless Scalper (v3.3) is starting.", flush=True)
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -38,7 +38,7 @@ def get_current_spy_price():
     except: return None
 
 def get_automated_ticker_and_prob():
-    """Finds the ticker and prob. Returns (None, 0) if not found."""
+    """Finds the ticker and prob. Safely handles String vs Float types."""
     spy_price = get_current_spy_price()
     if not spy_price: return None, 0
     
@@ -49,16 +49,29 @@ def get_automated_ticker_and_prob():
     try:
         res = requests.get(url, timeout=10).json()
         markets = res.get('markets', []) or res.get('event', {}).get('markets', [])
+        
         for m in markets:
-            if m.get('floor_strike', 0) <= spx_approx <= m.get('cap_strike', 99999):
-                raw = (m.get('last_price_dollars') or m.get('yes_bid_dollars') or m.get('yes_ask_dollars') or 0)
-                prob = float(raw) / 100.0 if raw > 1 else float(raw)
+            # Safely handle floor/cap strikes which might be strings too
+            floor = float(m.get('floor_strike', 0))
+            cap = float(m.get('cap_strike', 99999))
+            
+            if floor <= spx_approx <= cap:
+                # TYPE FIX: Grab the field and force it to a float immediately
+                raw_val = (m.get('last_price_dollars') or m.get('yes_bid_dollars') or 
+                           m.get('yes_ask_dollars') or m.get('last_price') or 0)
+                
+                try:
+                    num_val = float(raw_val)
+                except (ValueError, TypeError):
+                    num_val = 0.0
+                
+                # If it's a 'cent' value (e.g. 45), convert to decimal (0.45)
+                prob = num_val / 100.0 if num_val > 1.0 else num_val
                 return m['ticker'], prob
     except Exception as e:
         print(f"⚠️ Discovery API Error: {e}", flush=True)
         return None, 0
     
-    # CRITICAL FIX: If loop finishes with no match, return tuple instead of None
     return None, 0
 
 def get_live_positions():
@@ -114,11 +127,10 @@ def manage_active_trades():
                     place_order(symbol, qty, 'sell_to_close')
                     send_alert(f"🛑 LOSS: {symbol} at {change*100:.1f}%")
         except Exception as e:
-            print(f"⚠️ Management Error for {p.get('symbol')}: {e}", flush=True)
             continue
 
 def main():
-    send_alert("🤖 CRASH-PROOF SCALPER ONLINE: Heartbeat running.")
+    send_alert("🤖 TYPE-FIX SCALPER ONLINE: API errors should be cleared.")
     
     while True:
         try:
@@ -130,7 +142,6 @@ def main():
             manage_active_trades()
             
             if 930 <= time_val < 1550:
-                # UNPACKING SAFETY: get_automated_ticker_and_prob now ALWAYS returns two values
                 ticker, k_prob = get_automated_ticker_and_prob()
                 
                 if ticker:
@@ -163,8 +174,7 @@ def main():
                 return   
 
         except Exception as e:
-            # This block keeps the bot alive if anything else fails
-            print(f"🚨 MAJOR SYSTEM ERROR: {e}. Retrying in 30s...", flush=True)
+            print(f"🚨 SYSTEM ERROR: {e}. Retrying...", flush=True)
             
         time.sleep(30)
 
