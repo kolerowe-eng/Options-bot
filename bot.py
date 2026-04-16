@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: Iron-Logic Moonshot (v4.1) Loading...
-print("🩺 SYSTEM CHECK: Moonshot Runner & House Money Logic is active.", flush=True)
+# 🩺 SYSTEM CHECK: Scaled-Math Moonshot (v4.2) Loading...
+print("🩺 SYSTEM CHECK: Math Fix for Options Multiplier is active.", flush=True)
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -18,7 +18,6 @@ PROB_EDGE_THRESHOLD = 0.03
 MAX_RISK_PER_TRADE = 200   
 EST = pytz.timezone('US/Eastern')
 
-# Tracking to ensure we only take "House Money" once per trade
 sold_half_tracker = []
 
 # --- 2. CORE FUNCTIONS ---
@@ -39,7 +38,6 @@ def get_current_spy_price():
     except: return None
 
 def get_automated_ticker_and_prob():
-    """Finds Kalshi ticker and prob. Handles String vs Float types."""
     spy_price = get_current_spy_price()
     if not spy_price: return None, 0
     spx_approx = spy_price * 10
@@ -81,10 +79,9 @@ def place_order(symbol, qty, side='buy_to_open'):
         return res.status_code
     except: return 500
 
-# --- 3. THE MANAGEMENT BRAIN ---
+# --- 3. THE UPDATED MANAGEMENT BRAIN ---
 
 def manage_positions():
-    """Robust logic for Split-Exits and the 2:55 PM Kill-Switch."""
     global sold_half_tracker
     positions = get_live_positions()
     now = datetime.now(EST)
@@ -98,60 +95,50 @@ def manage_positions():
         try:
             symbol = p['symbol']
             qty = int(p['quantity'])
-            cost_basis = float(p['cost_basis']) / qty
-            target_price = cost_basis * 2.0  # The Double (100% gain)
             
-            # --- ROBUST QUOTE FETCHING ---
+            # MATH FIX: Tradier cost_basis is total $. 
+            # We divide by (qty * 100) to get the per-share cost basis.
+            cost_per_share = float(p['cost_basis']) / (qty * 100)
+            target_bid = cost_per_share * 2.0
+            
             q_url = f"https://sandbox.tradier.com/v1/markets/quotes?symbols={symbol}"
             q_res = requests.get(q_url, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
-            
-            # Handle both List and Dict formats from Tradier
             quote_data = q_res.get('quotes', {}).get('quote', {})
-            if isinstance(quote_data, list):
-                quote_data = quote_data[0]
-            
+            if isinstance(quote_data, list): quote_data = quote_data[0]
             current_bid = float(quote_data.get('bid', 0))
 
-            # Debugging to Richmond Logs
-            print(f"🧐 {symbol[-6:]} | Bid: {current_bid:.2f} | Need: {target_price:.2f}", flush=True)
+            print(f"🧐 {symbol[-6:]} | Bid: {current_bid:.2f} | Need: {target_bid:.2f}", flush=True)
 
-            # 1. THE 2:55 PM CST KILL-SWITCH (1555 EST)
             if time_val >= 1555:
                 place_order(symbol, qty, 'sell_to_close')
                 send_alert(f"💰 KILL-SWITCH: Closing {qty} {symbol}")
                 continue
 
-            # 2. THE HOUSE MONEY TRIGGER (100% GAIN)
-            if current_bid >= target_price and symbol not in sold_half_tracker:
+            if current_bid >= target_bid and symbol not in sold_half_tracker:
                 sell_qty = max(1, qty // 2)
                 status = place_order(symbol, sell_qty, 'sell_to_close')
-                
-                if status < 400: # Success
+                if status < 400:
                     sold_half_tracker.append(symbol)
-                    send_alert(f"💎 HOUSE MONEY: Sold {sell_qty} of {symbol} at ${current_bid}. Remaining {qty - sell_qty} are RUNNERS!")
-                else:
-                    print(f"⚠️ Sell order failed with status {status}", flush=True)
+                    send_alert(f"💎 HOUSE MONEY: Sold {sell_qty} of {symbol} at ${current_bid}.")
                 
         except Exception as e:
-            print(f"⚠️ Management error for {p.get('symbol', 'unknown')}: {e}", flush=True)
+            print(f"⚠️ Management error: {e}", flush=True)
 
 # --- 4. MAIN LOOP ---
 
 def main():
-    send_alert("🤖 MOONSHOT BOT ONLINE: House Money Mode Active.")
+    send_alert("🤖 MATH-FIXED BOT ONLINE: Let's get to work.")
     
     while True:
         try:
             now = datetime.now(EST)
             time_val = now.hour * 100 + now.minute
-            
             print(f"🕒 [{now.strftime('%H:%M:%S')}] Heartbeat: Active.", flush=True)
             
             manage_positions()
             
             if 930 <= time_val < 1555:
                 ticker, k_prob = get_automated_ticker_and_prob()
-                
                 if ticker:
                     url = "https://sandbox.tradier.com/v1/markets/options/chains"
                     params = {'symbol': 'SPY', 'expiration': now.strftime("%Y-%m-%d"), 'greeks': 'true'}
@@ -168,6 +155,7 @@ def main():
                             print(f"📊 {ticker[-5:]} | K: {k_prob:.2f} | T: {opt_prob:.2f} | Gap: {gap:.2f}", flush=True)
                         
                         if gap > PROB_EDGE_THRESHOLD:
+                            # STRIKE GUARD
                             current_symbols = [pos['symbol'] for pos in get_live_positions()]
                             if lotto['symbol'] not in current_symbols:
                                 qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
@@ -176,12 +164,8 @@ def main():
                                     send_alert(f"🚀 ENTRY: {qty} {lotto['symbol']} (Gap: {gap:.2f})")
                                     time.sleep(10)
             
-            elif time_val >= 1601:
-                send_alert("🌙 Day Over. Great work.")
-                return   
-
         except Exception as e:
-            print(f"🚨 SYSTEM ERROR: {e}. Retrying...", flush=True)
+            print(f"🚨 SYSTEM ERROR: {e}", flush=True)
             
         time.sleep(30)
 
