@@ -4,8 +4,8 @@ import requests
 from datetime import datetime
 import pytz
 
-# 🩺 SYSTEM CHECK: Strict-Type Scalper Loading...
-print("🩺 SYSTEM CHECK: Relentless Scalper (v3.3) is starting.", flush=True)
+# 🩺 SYSTEM CHECK: Moonshot Runner (v4.0) Loading...
+print("🩺 SYSTEM CHECK: Moonshot Runner & House Money Logic is active.", flush=True)
 
 # --- 1. CONFIGURATION ---
 TRADIER_TOKEN = os.getenv("TRADIER_TOKEN")
@@ -16,9 +16,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 PROB_EDGE_THRESHOLD = 0.03 
 MAX_RISK_PER_TRADE = 200   
-TAKE_PROFIT_PCT = 0.20 
-STOP_LOSS_PCT = 0.20   
 EST = pytz.timezone('US/Eastern')
+
+# Tracking to ensure we only take "House Money" once per trade
+sold_half_tracker = []
 
 # --- 2. CORE FUNCTIONS ---
 
@@ -38,40 +39,23 @@ def get_current_spy_price():
     except: return None
 
 def get_automated_ticker_and_prob():
-    """Finds the ticker and prob. Safely handles String vs Float types."""
     spy_price = get_current_spy_price()
     if not spy_price: return None, 0
-    
     spx_approx = spy_price * 10
     date_str = datetime.now(EST).strftime("%y%b%d").upper()
     url = f"https://api.elections.kalshi.com/trade-api/v2/events/KXINX-{date_str}H1600?with_nested_markets=true"
-    
     try:
         res = requests.get(url, timeout=10).json()
         markets = res.get('markets', []) or res.get('event', {}).get('markets', [])
-        
         for m in markets:
-            # Safely handle floor/cap strikes which might be strings too
             floor = float(m.get('floor_strike', 0))
             cap = float(m.get('cap_strike', 99999))
-            
             if floor <= spx_approx <= cap:
-                # TYPE FIX: Grab the field and force it to a float immediately
-                raw_val = (m.get('last_price_dollars') or m.get('yes_bid_dollars') or 
-                           m.get('yes_ask_dollars') or m.get('last_price') or 0)
-                
-                try:
-                    num_val = float(raw_val)
-                except (ValueError, TypeError):
-                    num_val = 0.0
-                
-                # If it's a 'cent' value (e.g. 45), convert to decimal (0.45)
+                raw_val = (m.get('last_price_dollars') or m.get('yes_bid_dollars') or m.get('yes_ask_dollars') or 0)
+                num_val = float(raw_val)
                 prob = num_val / 100.0 if num_val > 1.0 else num_val
                 return m['ticker'], prob
-    except Exception as e:
-        print(f"⚠️ Discovery API Error: {e}", flush=True)
-        return None, 0
-    
+    except: return None, 0
     return None, 0
 
 def get_live_positions():
@@ -96,41 +80,51 @@ def place_order(symbol, qty, side='buy_to_open'):
         return res.status_code
     except: return 500
 
-# --- 3. THE SCALPING ENGINE ---
+# --- 3. THE MOONSHOT MANAGEMENT ENGINE ---
 
-def manage_active_trades():
+def manage_positions():
+    """Manages 'House Money' exits and the 2:55 PM Kill-Switch."""
+    global sold_half_tracker
     positions = get_live_positions()
     now = datetime.now(EST)
     time_val = now.hour * 100 + now.minute
     
+    if not positions:
+        sold_half_tracker = [] # Clear tracker when account is empty
+        return
+
     for p in positions:
         try:
             symbol = p['symbol']
             qty = int(p['quantity'])
-            cost = float(p['cost_basis']) / qty
+            # Cost basis is total spent, so we divide by qty for per-contract cost
+            cost_per_contract = float(p['cost_basis']) / qty
             
+            # Fetch live Bid to see current value
             q_url = f"https://sandbox.tradier.com/v1/markets/quotes?symbols={symbol}"
             q_res = requests.get(q_url, headers={'Authorization': f'Bearer {TRADIER_TOKEN}', 'Accept': 'application/json'}).json()
             current_bid = float(q_res['quotes']['quote'].get('bid', 0))
-            
-            if time_val >= 1550:
+
+            # EXIT 1: THE 2:55 PM CST KILL-SWITCH (1555 EST)
+            if time_val >= 1555:
                 place_order(symbol, qty, 'sell_to_close')
-                send_alert(f"💰 EOD EXIT: Closed {symbol}")
+                send_alert(f"💰 FINAL LIQUIDATION: Closed {qty} {symbol} at market.")
                 continue
 
-            if current_bid > 0:
-                change = (current_bid - cost) / cost
-                if change >= TAKE_PROFIT_PCT:
-                    place_order(symbol, qty, 'sell_to_close')
-                    send_alert(f"💎 WIN: {symbol} at +{change*100:.1f}%")
-                elif change <= -STOP_LOSS_PCT:
-                    place_order(symbol, qty, 'sell_to_close')
-                    send_alert(f"🛑 LOSS: {symbol} at {change*100:.1f}%")
+            # EXIT 2: THE "HOUSE MONEY" 100% GAIN TRIGGER
+            if current_bid >= (cost_per_contract * 2.0) and symbol not in sold_half_tracker:
+                sell_qty = max(1, qty // 2)
+                place_order(symbol, sell_qty, 'sell_to_close')
+                sold_half_tracker.append(symbol)
+                send_alert(f"💎 HOUSE MONEY SECURED: Sold half of {symbol} at +100%. Remaining {qty - sell_qty} are now FREE RUNNERS.")
+                
         except Exception as e:
-            continue
+            print(f"⚠️ Management error for {p.get('symbol')}: {e}", flush=True)
+
+# --- 4. MAIN LOOP ---
 
 def main():
-    send_alert("🤖 TYPE-FIX SCALPER ONLINE: API errors should be cleared.")
+    send_alert("🤖 MOONSHOT BOT ONLINE: Hunting for runners.")
     
     while True:
         try:
@@ -139,9 +133,11 @@ def main():
             
             print(f"🕒 [{now.strftime('%H:%M:%S')}] Heartbeat: Active.", flush=True)
             
-            manage_active_trades()
+            # Always check for exits first
+            manage_positions()
             
-            if 930 <= time_val < 1550:
+            # Hunting Phase (8:30 AM - 2:55 PM CST)
+            if 930 <= time_val < 1555:
                 ticker, k_prob = get_automated_ticker_and_prob()
                 
                 if ticker:
@@ -160,17 +156,17 @@ def main():
                             print(f"📊 {ticker[-5:]} | K: {k_prob:.2f} | T: {opt_prob:.2f} | Gap: {gap:.2f}", flush=True)
                         
                         if gap > PROB_EDGE_THRESHOLD:
-                            current_symbols = [p['symbol'] for p in get_live_positions()]
+                            # Only buy if we don't already have this strike
+                            current_symbols = [pos['symbol'] for pos in get_live_positions()]
                             if lotto['symbol'] not in current_symbols:
                                 qty = int(MAX_RISK_PER_TRADE / (lotto['ask'] * 100))
                                 if qty > 0:
                                     place_order(lotto['symbol'], qty)
-                                    send_alert(f"🚀 SCALP ENTRY: {qty} {lotto['symbol']} (Gap: {gap:.2f})")
-                else:
-                    if time_val % 5 == 0: print("🔎 Scanner: Searching for market liquidity...", flush=True)
-                    
+                                    send_alert(f"🚀 MOONSHOT ENTRY: Bought {qty} {lotto['symbol']} (Gap: {gap:.2f})")
+                                    time.sleep(10) # Brief pause after entry
+            
             elif time_val >= 1601:
-                send_alert("🌙 Market closed.")
+                send_alert("🌙 Day Over. Great work in Richmond.")
                 return   
 
         except Exception as e:
